@@ -1,9 +1,11 @@
 # 片刻 (Pianke)
 
+![UI 预览图](ui_preview.png)
+
 > **让 AI 协助初筛与分组，把最终的审美决定权留给自己。**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](#一键启动推荐)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](#快速开始)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **片刻** 是一款专为摄影师和摄影爱好者设计的**本地照片双语/擂台式选片工具**。它能够将一次拍摄中相似的几十甚至上百张照片自动归入“同一个瞬间”的组中，然后通过直观的 **左右 A/B 擂台 PK** 方式，让你快速挑出最满意的一张。
@@ -44,42 +46,34 @@
 
 ## 快速开始
 
-> 💡 **强烈推荐小白用户使用 [Trae](https://www.trae.com.cn/)（或 Qoder）**：装好 Trae 后用它打开本项目文件夹，直接告诉 AI：
->
-> > **"先把 pip 换成阿里云源（`https://mirrors.aliyun.com/pypi/simple/`）或清华源（`https://pypi.tuna.tsinghua.edu.cn/simple`），再安装相关依赖并运行这个项目。"**
->
-> 国内默认走的 PyPI 官方源在没有梯子的情况下经常卡到超时，专家模式光依赖就有 2GB 多，不换源基本装不下来。换成阿里 / 清华镜像后整套依赖几分钟就能装完，剩下的交给 Trae 就行。
+针对国内网络环境下载缓慢的问题，如果你是开发者，强烈建议配置 pip 镜像源（如清华源或阿里云源）来进行环境安装。
 
-### 方式一：一键启动（推荐非开发者）
+### 方式一：一键启动（强烈推荐 Windows 用户）
 
-适合未安装 Python 环境或不熟悉命令行的用户。
+我们为你准备了极其简单的启动脚本，免去复杂的命令行输入：
 
-1. [下载项目 ZIP 压缩包](https://github.com/zhaoyue4810/pianke/archive/refs/heads/main.zip) 并解压到本地。
-2. 双击运行对应的启动器脚本：
+1. [下载项目 ZIP 压缩包](https://github.com/G1antBot/Selectgraphy_-/archive/refs/heads/main.zip) 并解压到本地。
+2. 双击运行根目录下的 `一键运行.bat`。
+3. 它会自动启动本地后台服务，并自动在浏览器中打开操作界面。
 
-| 系统 | 启动脚本 | 首次运行安全提示过白方式 |
-| :--- | :--- | :--- |
-| **macOS** | `启动_macOS.command` | 若提示“身份不明的开发者”：**按住 Control 键**点击脚本 ➔ 选择 **打开** ➔ 弹窗中再次点击 **打开**。 |
-| **Windows** | `启动_Windows.bat` | 若弹出“Windows 已保护你的电脑”：点击 **更多信息** ➔ 选择 **仍要运行**。 |
+*注：如果不想使用终端黑窗，你可以右键点击 `一键运行.bat` 发送到桌面快捷方式，以后双击桌面图标即可秒开。*
 
-*注：启动器会自动在项目独立目录下下载并构建 Python 环境，不污染你的系统环境。国内用户默认启用 PyPI 和模型镜像，可以使用环境变量 `PIANKE_NO_MIRROR=1` 禁用镜像走官方源。*
+### 方式二：手动启动（适合 macOS 用户或开发者）
 
-### 方式二：手动启动（适合开发者）
-
-如果你已安装 Python 环境并希望手动控制：
+如果你已安装 Python 3.10+ 环境并希望手动控制：
 
 ```bash
 # 1. 创建并激活虚拟环境
 python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 2. 安装项目依赖（包含所有模式的并集）
-pip install -r requirements.txt
+# 2. 安装项目依赖（包含所有模式的并集，建议使用清华镜像）
+pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 # 3. 运行服务（默认端口 5057，自动打开浏览器）
 python app.py
 
-# 常用参数：
+# 常用附加参数：
 python app.py --port 8080 --no-browser
 ```
 
@@ -154,6 +148,18 @@ python app.py --port 8080 --no-browser
 
 ---
 
+## 🚀 未来开发计划 (Roadmap)
+
+本项目正在积极迭代中，致力于从“人像初筛器”进化为全领域摄影辅助工具。我们在计划中的核心特性包括：
+
+- [ ] **包围曝光与全景识别**：对 HDR、全景接片、景深合成等风光/微距连拍序列进行智能识别与淘汰豁免。
+- [ ] **硬件感知与加速**：直观的 GPU/CPU 算力状态展示。
+- [ ] **多项目管理**：支持近期选片任务的历史记录与快速恢复。
+
+更多技术细节和未来规划，请查看 [待更新列表.md](待更新列表.md)。
+
+---
+
 ## 常见问题 (FAQ)
 
 <details>
@@ -195,12 +201,7 @@ python app.py --port 8080 --no-browser
 <summary><b>6. 如何彻底卸载和清理缓存？</b></summary>
 <ul>
   <li><b>清理照片缓存</b>：直接删除对应照片目录下的 <code>winners/</code>、<code>losers/</code>、<code>.pic_selecter_state.json</code> 及 <code>_pic_selecter/</code> 文件夹（移动模式下请先移回照片）。</li>
-  <li><b>完全卸载程序</b>：删除解压出的项目文件夹，并清理本地全局工具缓存：
-    <ul>
-      <li>macOS: <code>rm -rf ~/.local/bin/uv ~/.local/share/uv/</code></li>
-      <li>Windows: 删除 <code>%USERPROFILE%\.local\bin\uv.exe</code> 和 <code>%USERPROFILE%\.local\share\uv\</code></li>
-    </ul>
-  </li>
+  <li><b>完全卸载程序</b>：删除解压出的项目文件夹即可。</li>
 </ul>
 </details>
 
@@ -222,7 +223,4 @@ Windows 系统可能需要安装微软官方的 HEIF 扩展才能正常在浏览
 
 ## 反馈与贡献
 
-欢迎通过 [GitHub Issues](https://github.com/zhaoyue4810/pianke/issues) 提交反馈或建议。
-
-# 个人微信
-15828377122
+欢迎通过 [GitHub Issues](https://github.com/G1antBot/Selectgraphy_-/issues) 提交反馈或建议。
