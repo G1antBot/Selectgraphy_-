@@ -229,6 +229,56 @@ def _save_ark_key_to_file(key: str) -> None:
 # 启动期：从文件载入 key（env var 优先）
 _load_ark_key_from_file()
 
+# ---------------- 多相册历史记录 ----------------
+HISTORY_FILE = Path.home() / ".config" / "pic_selecter" / "history.json"
+
+def _load_history() -> list:
+    if not HISTORY_FILE.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        logger.warning(f"读取历史记录失败: {e}")
+        return []
+
+def _save_history(history: list) -> None:
+    try:
+        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"保存历史记录失败: {e}")
+
+def _record_history(folder: str) -> None:
+    history = _load_history()
+    history = [h for h in history if h.get("folder_path") != folder]
+    
+    # Try to read state to get progress if possible
+    try:
+        state = load_state(folder)
+        if state:
+            total = sum(len(g.items) for g in state.groups)
+            completed = state.current_group
+            total_groups = len(state.groups)
+        else:
+            total = 0
+            completed = 0
+            total_groups = 0
+    except Exception:
+        total = 0
+        completed = 0
+        total_groups = 0
+        
+    history.insert(0, {
+        "folder_path": folder,
+        "last_opened": int(time.time()),
+        "total": total,
+        "completed": completed,
+        "total_groups": total_groups
+    })
+    _save_history(history[:10])
+
+
 
 def setup_logger(folder: Optional[str]) -> None:
     """配置 rotating log handler。folder 变化时移除旧 handler，避免重复。"""
@@ -2156,6 +2206,26 @@ def api_ark_key_set():
     })
 
 
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    history = _load_history()
+    valid_history = []
+    changed = False
+    for item in history:
+        p = item.get("folder_path")
+        if p and Path(p).is_dir():
+            valid_history.append(item)
+        else:
+            changed = True
+    if changed:
+        _save_history(valid_history)
+    return jsonify(valid_history)
+
+@app.route("/api/history", methods=["DELETE"])
+def api_history_clear():
+    _save_history([])
+    return jsonify({"status": "ok"})
+
 @app.route("/api/ark_key", methods=["DELETE"])
 def api_ark_key_clear():
     """清除 API Key：删本地文件 + 从 os.environ 移除。"""
@@ -2269,6 +2339,10 @@ def api_start():
         return jsonify({"error": f"目录不存在: {folder}"}), 400
     if engine == "tycoon" and not llm_model:
         return jsonify({"error": "土豪模式需要选择 LLM 模型"}), 400
+
+    # 记录到近期项目历史
+    _record_history(folder)
+
 
     with LOCK:
         if JOB and JOB.status in ("pending", "scanning", "hashing", "grouping"):

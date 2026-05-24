@@ -214,33 +214,83 @@ document.querySelectorAll(".btn-go-home").forEach(el => el.addEventListener("cli
 // =================================================================
 // 着陆页
 // =================================================================
-function loadRecent() {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
-  catch { return []; }
-}
-function pushRecent(path) {
-  let rs = loadRecent().filter((p) => p !== path);
-  rs.unshift(path);
-  rs = rs.slice(0, 5);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(rs));
-}
-function renderRecent() {
-  const wrap = $("recent-folders");
-  const rs = loadRecent();
-  wrap.innerHTML = "";
-  if (!rs.length) return;
-  for (const p of rs) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "recent-chip";
-    chip.textContent = shortenHome(p);
-    chip.title = p;
-    chip.addEventListener("click", () => {
-      $("folder-input").value = p;
-      requestFolderPeek(p);
-    });
-    wrap.appendChild(chip);
+async function renderRecent() {
+  const wrap = $("recent-projects");
+  const cardsWrap = $("recent-cards");
+  if (!wrap || !cardsWrap) return;
+  
+  try {
+    const rs = await fetchJSON("/api/history");
+    if (!rs || !rs.length) {
+      wrap.classList.add("hidden");
+      return;
+    }
+    wrap.classList.remove("hidden");
+    cardsWrap.innerHTML = "";
+    
+    for (const item of rs) {
+      const p = item.folder_path;
+      const card = document.createElement("div");
+      card.className = "recent-card";
+      
+      const title = document.createElement("div");
+      title.className = "recent-card-title";
+      title.textContent = p ? p.split(/[\\/]/).pop() : "";
+      title.title = p;
+      
+      const meta = document.createElement("div");
+      meta.className = "recent-card-meta";
+      
+      const timeSpan = document.createElement("span");
+      const rtf = new Intl.RelativeTimeFormat('zh', { numeric: 'auto' });
+      const diffSecs = item.last_opened - Math.floor(Date.now() / 1000);
+      let timeStr = "";
+      if (Math.abs(diffSecs) < 60) timeStr = "刚刚";
+      else if (Math.abs(diffSecs) < 3600) timeStr = rtf.format(Math.ceil(diffSecs/60), 'minute');
+      else if (Math.abs(diffSecs) < 86400) timeStr = rtf.format(Math.ceil(diffSecs/3600), 'hour');
+      else timeStr = rtf.format(Math.ceil(diffSecs/86400), 'day');
+      timeSpan.textContent = timeStr;
+      
+      const progSpan = document.createElement("span");
+      progSpan.className = "recent-card-progress";
+      if (item.total_groups > 0) {
+        if (item.completed >= item.total_groups) {
+          progSpan.textContent = `已完成 (${item.total}张)`;
+          progSpan.style.color = "var(--good)";
+        } else {
+          progSpan.textContent = `处理中 ${item.completed}/${item.total_groups}`;
+        }
+      } else {
+        progSpan.textContent = `共 ${item.total} 张`;
+      }
+      
+      meta.appendChild(timeSpan);
+      meta.appendChild(progSpan);
+      
+      card.appendChild(title);
+      card.appendChild(meta);
+      
+      card.addEventListener("click", () => {
+        $("folder-input").value = p;
+        requestFolderPeek(p);
+      });
+      cardsWrap.appendChild(card);
+    }
+  } catch (err) {
+    console.error("加载历史失败:", err);
   }
+}
+
+const clearBtn = $("recent-clear-btn");
+if (clearBtn) {
+  clearBtn.addEventListener("click", async () => {
+    try {
+      await fetchJSON("/api/history", { method: "DELETE" });
+      renderRecent();
+    } catch (e) {
+      toast("清除历史失败：" + e.message);
+    }
+  });
 }
 
 function bindSlider(input, label) {
@@ -643,7 +693,7 @@ async function handleStart(e) {
         llm_model,
       }),
     });
-    pushRecent(folder);
+
     if (r && r.resumed) {
       await bootstrap();
     } else {
@@ -1891,8 +1941,6 @@ function renderGroup(group, sessionStatus) {
 
   const decided = group.decided || 0;
   const total = group.total_images || 0;
-  const groupPct = total ? Math.min(100, (decided / total) * 100) : 0;
-  $("group-fill").style.width = groupPct + "%";
   // 组标题：把裸 id 换成有时间感的描述
   let title = `组 #${group.id_short || ""}`;
   if (group.earliest_dt) {
@@ -1901,8 +1949,6 @@ function renderGroup(group, sessionStatus) {
     title = `连拍 ${total} 张`;
   }
   $("group-label").textContent = title;
-  $("group-prog-text").textContent =
-    `${decided} / ${total} 已决 · 剩 ${group.remaining_in_group}`;
 
   ["side-left", "side-right"].forEach((id) => {
     $(id).classList.remove("is-winner", "is-loser", "is-broken");
@@ -2222,23 +2268,38 @@ window.addEventListener("mouseup", () => {
 // =================================================================
 document.addEventListener("keydown", (e) => {
   if (e.repeat) return;
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  
+  // HUD 快捷键底栏 (按住 H 显示)
+  if (e.key === "h" || e.key === "H") {
+    document.body.classList.add("show-shortcuts");
+    return;
+  }
+  
   if (!$("lightbox").classList.contains("hidden")) {
     if (e.key === "Escape") closeLightbox();
     return;
   }
   if (!$("view-arena").classList.contains("active")) return;
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  
   if (e.key === "ArrowLeft") { e.preventDefault(); decide("pick-left"); }
   else if (e.key === "ArrowRight") { e.preventDefault(); decide("pick-right"); }
   else if (e.key === "ArrowUp") { e.preventDefault(); decide("both-keep"); }
   else if (e.key === "ArrowDown") { e.preventDefault(); decide("both-out"); }
   else if (e.key === "s" || e.key === "S") { skipGroup(); }
+  else if (e.key === "e" || e.key === "E") { document.body.classList.toggle("show-exif"); }
   else if (e.key === "z" || e.key === "Z") {
     if (e.shiftKey) { undo(); }
     else { cycleZoom(); }
   }
   else if (e.key === "[") { kickSide("left"); }
   else if (e.key === "]") { kickSide("right"); }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.key === "h" || e.key === "H") {
+    document.body.classList.remove("show-shortcuts");
+  }
 });
 
 // =================================================================
