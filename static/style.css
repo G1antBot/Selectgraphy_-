@@ -3092,6 +3092,41 @@ body:has(#view-processing.active) .status-badge {
   .engine-switch { grid-template-columns: 1fr; }
 }
 
+/* 拍摄场景 Profile 选择器 */
+.profile-switch {
+  display: flex; gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.profile-opt {
+  position: relative;
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  color: var(--ink-muted);
+  transition: border-color .18s var(--ease), background .18s var(--ease), color .18s;
+  user-select: none;
+}
+.profile-opt:hover { background: var(--bg-card-hover); color: var(--ink); }
+.profile-opt input[type="radio"] {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.profile-opt.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px var(--accent-glow) inset;
+}
+.profile-icon { font-size: 14px; line-height: 1; }
+.profile-name { letter-spacing: 0.01em; }
+.opt-label-hint { color: var(--ink-faint); font-weight: 400; font-size: 12px; }
+
 /* 土豪模式：模型选择展开区 */
 .tycoon-model-picker {
   margin: -10px 0 18px;

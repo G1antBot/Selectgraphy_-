@@ -257,7 +257,7 @@ def _record_history(folder: str) -> None:
     try:
         state = load_state(folder)
         if state:
-            total = sum(len(g.items) for g in state.groups)
+            total = sum(len(g.images) for g in state.groups)
             completed = state.current_group
             total_groups = len(state.groups)
         else:
@@ -584,6 +584,43 @@ def _group_from_dict(g: dict) -> GroupState:
     )
 
 
+# ─── 拍摄场景评分 Profile ──────────────────────────────────────────────────────
+# 格式：{"aesthetic": w, "sharpness": w, "face": w, "tech": w, "main_subject": bonus}
+# 四项权重之和 = 1.0；main_subject 是有主角出场时的额外加分。
+SCORING_PROFILES: dict[str, dict[str, float]] = {
+    "general": {  # 默认：人像友好的均衡配置
+        "aesthetic":     0.50,
+        "sharpness":     0.20,
+        "face":          0.15,
+        "tech":          0.15,
+        "main_subject":  0.50,
+    },
+    "portrait": {  # 强化人脸质量：婚礼、写真、证件
+        "aesthetic":     0.35,
+        "sharpness":     0.20,
+        "face":          0.35,
+        "tech":          0.10,
+        "main_subject":  0.60,
+    },
+    "landscape": {  # 人脸权重清零：风光、建筑、星空
+        "aesthetic":     0.55,
+        "sharpness":     0.30,
+        "face":          0.00,
+        "tech":          0.15,
+        "main_subject":  0.00,
+    },
+    "event": {  # 活动纪实：动态优先，容忍轻微的景深不足
+        "aesthetic":     0.40,
+        "sharpness":     0.30,
+        "face":          0.15,
+        "tech":          0.15,
+        "main_subject":  0.40,
+    },
+}
+
+# 当前全局 profile（线程安全：仅在 /api/start 时修改，session 期间只读）
+_SCORING_PROFILE: dict[str, float] = SCORING_PROFILES["general"]
+
 AUTO_WIN_MARGIN = {
     # 最佳 vs 第二名差距大于此值 → 整组自动定胜负，无需用户在擂台决定
     "standard": 18.0,
@@ -678,18 +715,19 @@ def _subject_sharpness(info: ImageInfo) -> float:
 def _composite_score(info: ImageInfo, main_subject_present: bool = False) -> float:
     """组内排名用的合成分。范围 ~0-10，越大越好。
 
-    权重：美学 0.50 · 主体锐度 0.20 · 脸部质量 0.15 · 旧技术分 0.15
-    主角出现时给 +0.5 加成。
+    权重来自全局 _SCORING_PROFILE（可在 /api/start 按场景 profile 调整）。
     """
+    p = _SCORING_PROFILE
     aes = _aesthetic_score(info)
     aes01 = (aes / 10.0) if aes is not None else 0.5
     subj = _subject_sharpness(info)
     facq = _face_quality_score(info)
     techq = _quality_score(info) / 100.0  # 0-1
 
-    score = (0.50 * aes01 + 0.20 * subj + 0.15 * facq + 0.15 * techq) * 10.0
+    score = (p["aesthetic"] * aes01 + p["sharpness"] * subj +
+             p["face"] * facq + p["tech"] * techq) * 10.0
     if main_subject_present:
-        score += 0.5
+        score += p["main_subject"]
     # 致命旗（闭眼 / 严重糊脸）一刀压低
     flags = _quality_flags(info)
     if "eyes_closed" in flags:
@@ -2331,6 +2369,9 @@ def api_start():
     if prescreen_strength not in ("standard", "advanced"):
         prescreen_strength = "standard"
     face_aware = bool(data.get("face_aware", True))
+    scoring_profile = data.get("scoring_profile", "general")
+    if scoring_profile not in SCORING_PROFILES:
+        scoring_profile = "general"
 
     if not folder:
         return jsonify({"error": "请填写文件夹路径"}), 400
@@ -2343,6 +2384,10 @@ def api_start():
     # 记录到近期项目历史
     _record_history(folder)
 
+    # 应用评分 Profile（全局，session 期间只读）
+    global _SCORING_PROFILE
+    _SCORING_PROFILE = SCORING_PROFILES[scoring_profile]
+    logger.info("scoring_profile=%s weights=%s", scoring_profile, _SCORING_PROFILE)
 
     with LOCK:
         if JOB and JOB.status in ("pending", "scanning", "hashing", "grouping"):

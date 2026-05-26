@@ -9,6 +9,28 @@ const CONFIRM_REAL_KEY = "pic-arena.confirmed-real";
 const VERDICT_HOLD_MS = 380;
 
 let busy = false;
+let _busyTimer = null;
+const BUSY_TIMEOUT_MS = 10_000; // 10 秒后强制解锁，避免卡死
+
+function setBusy() {
+  busy = true;
+  clearTimeout(_busyTimer);
+  _busyTimer = setTimeout(() => {
+    if (busy) {
+      busy = false;
+      toast("操作超时，已自动解锁。如有问题请手动刷新。");
+      // 恢复 UI 状态
+      document.getElementById("side-left")?.classList.remove("is-winner", "is-loser");
+      document.getElementById("side-right")?.classList.remove("is-winner", "is-loser");
+    }
+  }, BUSY_TIMEOUT_MS);
+}
+
+function releaseBusy() {
+  busy = false;
+  clearTimeout(_busyTimer);
+  _busyTimer = null;
+}
 let pollHandle = null;
 let lastSession = null;
 let currentGroup = null;
@@ -340,6 +362,18 @@ document.querySelectorAll(".engine-opt").forEach(el => {
       radio.checked = true;
       syncEngineSwitch();
     }
+  });
+});
+
+// 拍摄场景 profile 选项块点击切换
+document.querySelectorAll(".profile-opt").forEach(el => {
+  el.addEventListener("click", () => {
+    const radio = el.querySelector('input[type="radio"]');
+    if (radio && !radio.checked) {
+      radio.checked = true;
+    }
+    document.querySelectorAll(".profile-opt").forEach(o => o.classList.remove("is-active"));
+    el.classList.add("is-active");
   });
 });
 
@@ -684,12 +718,14 @@ async function handleStart(e) {
       $("start-btn").disabled = false;
       return;
     }
+    const scoring_profile = document.querySelector('input[name="scoring_profile"]:checked')?.value || "general";
     const r = await fetchJSON("/api/start", {
       method: "POST",
       body: JSON.stringify({
         folder, dry_run, wipe_cache, mode, engine,
         threshold_near, threshold_far, near_seconds,
         prescreen_enabled, prescreen_strength, face_aware,
+        scoring_profile,
         llm_model,
       }),
     });
@@ -2042,7 +2078,7 @@ async function decide(action) {
        $("side-right").classList.contains("is-broken"))) {
     toast("有损坏图，无法两张都留。请先用 [ 或 ] 踢掉那张。"); return;
   }
-  busy = true;
+  setBusy();
 
   const left = $("side-left");
   const right = $("side-right");
@@ -2073,17 +2109,21 @@ async function decide(action) {
       body: JSON.stringify({ loser }),
     });
   } catch (err) {
-    busy = false;
+    releaseBusy();
     left.classList.remove("is-winner", "is-loser");
     right.classList.remove("is-winner", "is-loser");
     toast("出错了：" + err.message);
     return;
   }
   await animDone;
-  s = await fetchJSON("/api/status");
-  if (r.done) { busy = false; enterDone(s); return; }
+  try {
+    s = await fetchJSON("/api/status");
+  } catch (_) {
+    s = lastSession; // 状态获取失败时用缓存的数据展示
+  }
+  if (r.done) { releaseBusy(); enterDone(s); return; }
   renderGroup(r.group, s);
-  busy = false;
+  releaseBusy();
 }
 
 async function kickSide(side) {
@@ -2092,7 +2132,7 @@ async function kickSide(side) {
     toast("右侧无图。"); return;
   }
   if (side === "left" && !currentGroup.left) return;
-  busy = true;
+  setBusy();
   try {
     const r = await fetchJSON("/api/kick", {
       method: "POST",
@@ -2104,13 +2144,13 @@ async function kickSide(side) {
   } catch (e) {
     toast("踢出失败：" + e.message);
   } finally {
-    busy = false;
+    releaseBusy();
   }
 }
 
 async function skipGroup() {
   if (busy) return;
-  busy = true;
+  setBusy();
   try {
     const r = await fetchJSON("/api/skip_group", { method: "POST" });
     const s = await fetchJSON("/api/status");
@@ -2118,13 +2158,13 @@ async function skipGroup() {
     renderGroup(r.group, s);
     toast("放到最后了，可以稍后再决");
   } finally {
-    busy = false;
+    releaseBusy();
   }
 }
 
 async function undo() {
   if (busy) return;
-  busy = true;
+  setBusy();
   try {
     const r = await fetchJSON("/api/undo", { method: "POST" });
     const s = await fetchJSON("/api/status");
@@ -2133,7 +2173,7 @@ async function undo() {
   } catch (err) {
     console.error(err);
   } finally {
-    busy = false;
+    releaseBusy();
   }
 }
 

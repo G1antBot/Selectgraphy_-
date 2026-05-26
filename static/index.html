@@ -153,6 +153,32 @@
             </div>
 
             <div class="opt-section">
+              <div class="opt-label">拍摄场景 <span class="opt-label-hint">· 影响 AI 排序权重</span></div>
+              <div class="profile-switch" role="radiogroup" aria-label="拍摄场景">
+                <label class="profile-opt is-active" data-profile="general">
+                  <input type="radio" name="scoring_profile" value="general" checked>
+                  <span class="profile-icon">🎞</span>
+                  <span class="profile-name">通用</span>
+                </label>
+                <label class="profile-opt" data-profile="portrait">
+                  <input type="radio" name="scoring_profile" value="portrait">
+                  <span class="profile-icon">🧑</span>
+                  <span class="profile-name">人像</span>
+                </label>
+                <label class="profile-opt" data-profile="landscape">
+                  <input type="radio" name="scoring_profile" value="landscape">
+                  <span class="profile-icon">🏔</span>
+                  <span class="profile-name">风光</span>
+                </label>
+                <label class="profile-opt" data-profile="event">
+                  <input type="radio" name="scoring_profile" value="event">
+                  <span class="profile-icon">⚡</span>
+                  <span class="profile-name">活动</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="opt-section">
               <label class="check">
                 <input type="checkbox" id="opt-prescreen" checked>
                 <span>智能初筛 · 先自动淘汰明显的失焦 / 闭眼 / 过曝</span>
