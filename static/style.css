@@ -687,26 +687,42 @@ body.show-exif .exif-overlay {
 }
 
 /* ─── 热力图 & 差异图 overlay ─────────────────────────── */
+/* overlays 现在在 .zoom-viewport 内，与照片同级，精确对齐 */
+.zoom-viewport {
+  position: relative;  /* 让绝对定位子元素基准在 viewport 内 */
+}
+
 .heatmap-overlay,
 .diff-overlay {
+  /* 与照片绑定：跟随照片在 viewport 内的实际尺寸 */
   position: absolute;
-  inset: 0;
-  width: 100%; height: 100%;
-  object-fit: cover;
-  object-position: center;
+  /* 用 max-width/max-height + auto margin 复现 object-fit: contain 的居中效果 */
+  max-width: 100%; max-height: 100%;
+  width: auto; height: auto;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.35s var(--ease);
   z-index: 8;
-  border-radius: inherit;
 }
 
-body.show-heatmap .heatmap-overlay { opacity: 0.72; }
-body.show-diff    .diff-overlay    { opacity: 0.80; }
+/* 差异图：用 multiply 混合让红色与照片融合，不会整片覆盖 */
+.diff-overlay {
+  mix-blend-mode: multiply;
+}
+/* 热力图：用 screen 混合让暖色叠加更自然 */
+.heatmap-overlay {
+  mix-blend-mode: hard-light;
+}
 
-/* 激活态：在图片上方显示状态标签 */
-body.show-heatmap .img-frame::after,
-body.show-diff    .img-frame::after {
+body.show-heatmap .heatmap-overlay { opacity: 0.60; }
+body.show-diff    .diff-overlay    { opacity: 0.65; }
+
+/* 激活态标签：改放在 .zoom-viewport::after，对齐到照片左上角 */
+body.show-heatmap .zoom-viewport::after,
+body.show-diff    .zoom-viewport::after {
+  display: block;
   position: absolute;
   top: 10px; left: 10px;
   font-family: var(--font-mono);
@@ -720,8 +736,8 @@ body.show-diff    .img-frame::after {
   pointer-events: none;
   z-index: 20;
 }
-body.show-heatmap .img-frame::after { content: "F · 热力图"; }
-body.show-diff    .img-frame::after { content: "D · 差异图"; }
+body.show-heatmap .zoom-viewport::after { content: "F · 热力图"; }
+body.show-diff    .zoom-viewport::after { content: "D · 差异图"; }
 
 /* 当判决发生时，隐藏 hover 提示 */
 .side.is-winner .img-overlay,

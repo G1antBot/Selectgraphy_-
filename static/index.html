@@ -507,8 +507,10 @@
     <div class="side" id="side-left">
       <div class="img-frame">
         <button class="kick-btn" data-side="left" title="只踢掉这张">⊘ 踢掉</button>
-        <div class="zoom-viewport">
+        <div class="zoom-viewport" id="zoom-left">
           <img id="img-left" alt="左侧图片">
+          <img class="heatmap-overlay" id="heatmap-left" alt="" aria-hidden="true">
+          <img class="diff-overlay" id="diff-left" alt="" aria-hidden="true">
         </div>
         <div class="verdict win">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
@@ -531,8 +533,6 @@
           <div class="caption" id="caption-left"></div>
           <div class="exif-line" id="exif-left"></div>
         </div>
-        <img class="heatmap-overlay" id="heatmap-left" alt="" aria-hidden="true">
-        <img class="diff-overlay" id="diff-left" alt="" aria-hidden="true">
       </div>
       <div class="llm-comment" id="llm-left" hidden></div>
     </div>
@@ -552,8 +552,10 @@
     <div class="side" id="side-right">
       <div class="img-frame">
         <button class="kick-btn" data-side="right" title="只踢掉这张">⊘ 踢掉</button>
-        <div class="zoom-viewport">
+        <div class="zoom-viewport" id="zoom-right">
           <img id="img-right" alt="右侧图片">
+          <img class="heatmap-overlay" id="heatmap-right" alt="" aria-hidden="true">
+          <img class="diff-overlay" id="diff-right" alt="" aria-hidden="true">
         </div>
         <div class="empty-overlay">已无对比图</div>
         <div class="verdict win">
@@ -577,8 +579,6 @@
           <div class="caption" id="caption-right"></div>
           <div class="exif-line" id="exif-right"></div>
         </div>
-        <img class="heatmap-overlay" id="heatmap-right" alt="" aria-hidden="true">
-        <img class="diff-overlay" id="diff-right" alt="" aria-hidden="true">
       </div>
       <div class="llm-comment" id="llm-right" hidden></div>
     </div>
