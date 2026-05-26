@@ -2046,15 +2046,26 @@ function renderGroup(group, sessionStatus) {
     return;
   }
 
-  // 切组时清掉旧的 overlay 图，并按当前激活状态重新加载
-  clearOverlays();
-  // 保持用户上一次的 overlay 选择（如果已激活则立刻请求新图）
-  if (document.body.classList.contains("show-diff") && group.right) {
+  // 切组时清掉旧的 overlay src，但保留用户的 overlay 开关状态
+  const _wasDiff    = document.body.classList.contains("show-diff");
+  const _wasHeatmap = document.body.classList.contains("show-heatmap");
+  // 只清图片 src，不移除 body class（由下面决定）
+  ["diff-left", "diff-right", "heatmap-left", "heatmap-right"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.src = "";
+  });
+  // 按当前激活状态立刻请求新图
+  if (_wasDiff && group.right) {
     document.body.classList.add("show-diff");
     loadDiffOverlay();
+  } else {
+    document.body.classList.remove("show-diff");
   }
-  if (document.body.classList.contains("show-heatmap")) {
+  if (_wasHeatmap) {
+    document.body.classList.add("show-heatmap");
     loadHeatmapOverlay();
+  } else {
+    document.body.classList.remove("show-heatmap");
   }
 
   $("caption-left").textContent = basename(group.left);

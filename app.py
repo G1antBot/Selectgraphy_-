@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageChops, ImageFilter
 
 from pic_selecter import grouper
 from pic_selecter.grouper import (
