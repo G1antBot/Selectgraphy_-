@@ -597,6 +597,70 @@ syncEngineSwitch();
 // ---------- 文件夹快照（路径选好的瞬间触发） ----------
 let peekTimer = null;
 let peekToken = 0;
+// 存储当前 days 数据
+let _peekDays = [];
+
+function renderDateFilter(days) {
+  _peekDays = days;
+  const section = $("date-filter");
+  const chips = $("date-chips");
+  const summary = $("date-filter-summary");
+  chips.innerHTML = "";
+  if (!days || days.length <= 1) {
+    section.classList.add("hidden");
+    return;
+  }
+  section.classList.remove("hidden");
+  days.forEach(day => {
+    const chip = document.createElement("div");
+    chip.className = "date-chip is-selected";  // 默认全选
+    chip.dataset.date = day.date;
+    chip.innerHTML = `<span>${day.label}</span><span class="date-chip-count">${day.count}</span>`;
+    chip.addEventListener("click", () => {
+      chip.classList.toggle("is-selected");
+      updateDateFilterSummary();
+    });
+    chips.appendChild(chip);
+  });
+  updateDateFilterSummary();
+}
+
+function updateDateFilterSummary() {
+  const selected = getSelectedDates();
+  const total = _peekDays.reduce((s, d) => s + d.count, 0);
+  const selCount = selected.reduce((s, date) => {
+    const d = _peekDays.find(x => x.date === date);
+    return s + (d ? d.count : 0);
+  }, 0);
+  const summary = $("date-filter-summary");
+  if (!summary) return;
+  if (selected.length === _peekDays.length) {
+    summary.textContent = `全部 ${total} 张`;
+    summary.className = "date-filter-summary";
+  } else if (selected.length === 0) {
+    summary.textContent = "⚠️ 未选择任何日期，将处理全部";
+    summary.className = "date-filter-summary";
+  } else {
+    summary.textContent = `本次处理 ${selCount} 张（共 ${total} 张）`;
+    summary.className = "date-filter-summary active";
+  }
+}
+
+function getSelectedDates() {
+  return Array.from(document.querySelectorAll(".date-chip.is-selected"))
+    .map(c => c.dataset.date);
+}
+
+$("date-select-all")?.addEventListener("click", () => {
+  const all = document.querySelectorAll(".date-chip");
+  const anyUnselected = Array.from(all).some(c => !c.classList.contains("is-selected"));
+  all.forEach(c => {
+    if (anyUnselected) c.classList.add("is-selected");
+    else c.classList.remove("is-selected");
+  });
+  updateDateFilterSummary();
+});
+
 function requestFolderPeek(folder) {
   clearTimeout(peekTimer);
   if (!folder || folder.length < 2) {
@@ -644,6 +708,10 @@ async function doFolderPeek(folder) {
   });
   sw.style.display = r.samples?.length ? "" : "none";
   $("folder-snapshot").classList.remove("hidden");
+
+  // 按日分批选择器：多天拍摄时显示
+  renderDateFilter(r.days || []);
+
   setStatus(`已读取 ${r.count.toLocaleString()} 张 · 待处理`, "idle");
 }
 
@@ -719,6 +787,11 @@ async function handleStart(e) {
       return;
     }
     const scoring_profile = document.querySelector('input[name="scoring_profile"]:checked')?.value || "general";
+    // 按日分批：只有用户主动排除了某天时才传 filter_dates
+    const selectedDates = getSelectedDates();
+    const filter_dates = (selectedDates.length > 0 && selectedDates.length < _peekDays.length)
+      ? selectedDates
+      : [];
     const r = await fetchJSON("/api/start", {
       method: "POST",
       body: JSON.stringify({
@@ -726,6 +799,7 @@ async function handleStart(e) {
         threshold_near, threshold_far, near_seconds,
         prescreen_enabled, prescreen_strength, face_aware,
         scoring_profile,
+        filter_dates,
         llm_model,
       }),
     });
@@ -1972,6 +2046,17 @@ function renderGroup(group, sessionStatus) {
     return;
   }
 
+  // 切组时清掉旧的 overlay 图，并按当前激活状态重新加载
+  clearOverlays();
+  // 保持用户上一次的 overlay 选择（如果已激活则立刻请求新图）
+  if (document.body.classList.contains("show-diff") && group.right) {
+    document.body.classList.add("show-diff");
+    loadDiffOverlay();
+  }
+  if (document.body.classList.contains("show-heatmap")) {
+    loadHeatmapOverlay();
+  }
+
   $("caption-left").textContent = basename(group.left);
   $("caption-right").textContent = basename(group.right);
 
@@ -2328,6 +2413,16 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowDown") { e.preventDefault(); decide("both-out"); }
   else if (e.key === "s" || e.key === "S") { skipGroup(); }
   else if (e.key === "e" || e.key === "E") { document.body.classList.toggle("show-exif"); }
+  else if (e.key === "d" || e.key === "D") {
+    // 差异图：只有两张图时才有意义
+    if (!currentGroup || !currentGroup.right) { toast("单张图无对比。"); return; }
+    document.body.classList.toggle("show-diff");
+    if (document.body.classList.contains("show-diff")) loadDiffOverlay();
+  }
+  else if (e.key === "f" || e.key === "F") {
+    document.body.classList.toggle("show-heatmap");
+    if (document.body.classList.contains("show-heatmap")) loadHeatmapOverlay();
+  }
   else if (e.key === "z" || e.key === "Z") {
     if (e.shiftKey) { undo(); }
     else { cycleZoom(); }
@@ -2341,6 +2436,36 @@ document.addEventListener("keyup", (e) => {
     document.body.classList.remove("show-shortcuts");
   }
 });
+
+// ─── Overlay: 差异图 & 热力图 ──────────────────────────────────────────────
+function clearOverlays() {
+  ["diff-left", "diff-right", "heatmap-left", "heatmap-right"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.src = "";
+  });
+  document.body.classList.remove("show-diff", "show-heatmap");
+}
+
+function loadDiffOverlay() {
+  if (!currentGroup || !currentGroup.left || !currentGroup.right) return;
+  const w = Math.min(document.getElementById("img-left")?.naturalWidth || 900, 900);
+  const url = `/api/diff?left=${encodeURIComponent(currentGroup.left)}&right=${encodeURIComponent(currentGroup.right)}&w=${w}`;
+  const lEl = document.getElementById("diff-left");
+  const rEl = document.getElementById("diff-right");
+  if (lEl) lEl.src = url;
+  if (rEl) rEl.src = url;  // 两侧叠加同一张差异图
+}
+
+function loadHeatmapOverlay() {
+  if (!currentGroup) return;
+  const w = Math.min(document.getElementById("img-left")?.naturalWidth || 900, 900);
+  const lEl = document.getElementById("heatmap-left");
+  const rEl = document.getElementById("heatmap-right");
+  if (lEl && currentGroup.left)
+    lEl.src = `/api/heatmap?path=${encodeURIComponent(currentGroup.left)}&w=${w}`;
+  if (rEl && currentGroup.right)
+    rEl.src = `/api/heatmap?path=${encodeURIComponent(currentGroup.right)}&w=${w}`;
+}
 
 // =================================================================
 // 完成页
@@ -2965,6 +3090,105 @@ $("wm-next").addEventListener("click", () => {
 });
 $("wm-modal").addEventListener("click", (e) => {
   if (e.target.id === "wm-modal") wmClose();
+});
+
+// =================================================================
+// 归档到相册
+// =================================================================
+function archiveOpen() {
+  const modal = $("archive-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  // 预填相册名：取当前 session 文件夹名
+  const albumInput = $("archive-album-name");
+  if (albumInput && !albumInput.value && lastSession?.folder) {
+    albumInput.value = lastSession.folder.split(/[\\/]/).filter(Boolean).pop() || "";
+  }
+  archiveUpdatePreview();
+  $("archive-result").textContent = "";
+  $("archive-result").className = "archive-result";
+}
+
+function archiveClose() {
+  $("archive-modal")?.classList.add("hidden");
+}
+
+function archiveUpdatePreview() {
+  const root = ($("archive-dest-root")?.value || "").trim();
+  const name = ($("archive-album-name")?.value || "").trim();
+  const prev = $("archive-preview");
+  if (!prev) return;
+  if (root && name) {
+    const sep = root.includes("\\") ? "\\" : "/";
+    prev.textContent = `→ ${root}${sep}${name}${sep}`;
+    prev.classList.add("has-path");
+  } else {
+    prev.textContent = "→ 请填写上面两项";
+    prev.classList.remove("has-path");
+  }
+}
+
+async function archiveConfirm() {
+  const dest_root = ($("archive-dest-root")?.value || "").trim();
+  const album_name = ($("archive-album-name")?.value || "").trim();
+  const mode = document.querySelector('input[name="archive_mode"]:checked')?.value || "copy";
+  const resultEl = $("archive-result");
+
+  if (!dest_root) { resultEl.textContent = "请填写保存位置"; resultEl.className = "archive-result is-error"; return; }
+  if (!album_name) { resultEl.textContent = "请填写相册名称"; resultEl.className = "archive-result is-error"; return; }
+
+  $("archive-confirm").disabled = true;
+  resultEl.textContent = "归档中…";
+  resultEl.className = "archive-result";
+
+  try {
+    const r = await fetchJSON("/api/archive", {
+      method: "POST",
+      body: JSON.stringify({ dest_root, album_name, mode }),
+    });
+    if (r.ok) {
+      const verb = mode === "move" ? "已移动" : "已复制";
+      resultEl.textContent = `✓ ${verb} ${r.count} 张 → ${r.dest}`;
+      resultEl.className = "archive-result";
+    } else {
+      resultEl.textContent = r.error || "归档失败";
+      resultEl.className = "archive-result is-error";
+    }
+  } catch (err) {
+    resultEl.textContent = err.message;
+    resultEl.className = "archive-result is-error";
+  } finally {
+    $("archive-confirm").disabled = false;
+  }
+}
+
+// 归档模态框事件绑定
+document.getElementById("btn-archive")?.addEventListener("click", archiveOpen);
+document.getElementById("archive-close")?.addEventListener("click", archiveClose);
+document.getElementById("archive-cancel")?.addEventListener("click", archiveClose);
+document.getElementById("archive-confirm")?.addEventListener("click", archiveConfirm);
+document.getElementById("archive-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "archive-modal") archiveClose();
+});
+document.getElementById("archive-browse-btn")?.addEventListener("click", async () => {
+  try {
+    const r = await fetchJSON("/api/browse_folder", { method: "POST" });
+    if (r?.folder) {
+      $("archive-dest-root").value = r.folder;
+      archiveUpdatePreview();
+    }
+  } catch (e) { /* ignore */ }
+});
+["archive-dest-root", "archive-album-name"].forEach(id => {
+  document.getElementById(id)?.addEventListener("input", archiveUpdatePreview);
+});
+document.querySelectorAll(".archive-mode-opt").forEach(el => {
+  el.addEventListener("click", () => {
+    const radio = el.querySelector('input[type="radio"]');
+    if (radio) radio.checked = true;
+    document.querySelectorAll(".archive-mode-opt").forEach(o => o.classList.remove("is-active"));
+    el.classList.add("is-active");
+  });
 });
 
 bootstrap();

@@ -137,6 +137,17 @@
           <div class="snap-samples" id="snap-samples"></div>
         </div>
 
+        <!-- 按日分批：多天时显示，用户可选择本次只处理哪几天 -->
+        <div id="date-filter" class="date-filter hidden">
+          <div class="date-filter-head">
+            <span class="date-filter-label">按拍摄日分批</span>
+            <span class="date-filter-hint">· 多次处理，各个击破</span>
+            <button id="date-select-all" class="date-select-all">全选</button>
+          </div>
+          <div id="date-chips" class="date-chips"></div>
+          <div class="date-filter-summary" id="date-filter-summary"></div>
+        </div>
+
         <details class="advanced">
           <summary>更多选项</summary>
           <div class="advanced-body">
@@ -520,6 +531,8 @@
           <div class="caption" id="caption-left"></div>
           <div class="exif-line" id="exif-left"></div>
         </div>
+        <img class="heatmap-overlay" id="heatmap-left" alt="" aria-hidden="true">
+        <img class="diff-overlay" id="diff-left" alt="" aria-hidden="true">
       </div>
       <div class="llm-comment" id="llm-left" hidden></div>
     </div>
@@ -564,6 +577,8 @@
           <div class="caption" id="caption-right"></div>
           <div class="exif-line" id="exif-right"></div>
         </div>
+        <img class="heatmap-overlay" id="heatmap-right" alt="" aria-hidden="true">
+        <img class="diff-overlay" id="diff-right" alt="" aria-hidden="true">
       </div>
       <div class="llm-comment" id="llm-right" hidden></div>
     </div>
@@ -594,6 +609,8 @@
         <span class="kbd">⇧Z</span> 撤销
       </button>
       <span class="sc-item"><span class="kbd">E</span> 显隐参数</span>
+      <span class="sc-item"><span class="kbd">D</span> 差异图</span>
+      <span class="sc-item"><span class="kbd">F</span> 热力图</span>
     </div>
   </footer>
 
@@ -679,6 +696,12 @@
       <div class="winners-section-head">
         <h2 class="winners-section-title">这次留下的</h2>
         <span class="winners-count" id="winners-count"></span>
+        <button id="btn-archive" class="btn-ghost btn-archive-trigger" title="将胜出照片归档到指定相册文件夹">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.04a1.5 1.5 0 0 1 1.06.44L7.66 4.34a1.5 1.5 0 0 0 1.06.44H12.5A1.5 1.5 0 0 1 14 6.28V11.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+          归档到相册
+        </button>
       </div>
       <div id="done-album" class="done-album"></div>
       <div id="winners-grid" class="winners-grid"></div>
@@ -700,6 +723,59 @@
   </div>
 
   <!-- ============ 相机水印导出弹窗 ============ -->
+  <!-- ============ 归档到相册弹窗 ============ -->
+  <div id="archive-modal" class="archive-modal hidden" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
+    <div class="archive-modal-card">
+      <header class="archive-modal-head">
+        <div>
+          <h3 id="archive-modal-title">归档到相册文件夹</h3>
+          <p class="archive-modal-sub">将 winners 里的照片复制或移动到你的相册库</p>
+        </div>
+        <button class="archive-close" id="archive-close" aria-label="关闭">×</button>
+      </header>
+
+      <div class="archive-modal-body">
+        <div class="archive-field">
+          <label class="archive-label" for="archive-album-name">相册名称</label>
+          <input type="text" id="archive-album-name" class="archive-input" placeholder="例如：京都2025" autocomplete="off">
+        </div>
+        <div class="archive-field">
+          <label class="archive-label" for="archive-dest-root">保存位置</label>
+          <div class="archive-path-row">
+            <input type="text" id="archive-dest-root" class="archive-input" placeholder="/Volumes/Photos 或 D:\Photos" autocomplete="off">
+            <button id="archive-browse-btn" class="btn-ghost archive-browse">浏览…</button>
+          </div>
+        </div>
+        <div class="archive-preview" id="archive-preview">→ 请填写上面两项</div>
+
+        <div class="archive-mode-row">
+          <label class="archive-mode-opt is-active" data-mode="copy">
+            <input type="radio" name="archive_mode" value="copy" checked>
+            <span class="archive-mode-icon">📋</span>
+            <span>
+              <strong>复制</strong>
+              <span class="archive-mode-desc">保留 winners/ 原件</span>
+            </span>
+          </label>
+          <label class="archive-mode-opt" data-mode="move">
+            <input type="radio" name="archive_mode" value="move">
+            <span class="archive-mode-icon">✂️</span>
+            <span>
+              <strong>移动</strong>
+              <span class="archive-mode-desc">从 winners/ 转移</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <footer class="archive-modal-foot">
+        <span id="archive-result" class="archive-result"></span>
+        <button id="archive-cancel" class="btn-ghost">取消</button>
+        <button id="archive-confirm" class="btn btn-primary small">确认归档</button>
+      </footer>
+    </div>
+  </div>
+
   <div id="wm-modal" class="wm-modal hidden">
     <div class="wm-modal-card">
       <header class="wm-modal-head">

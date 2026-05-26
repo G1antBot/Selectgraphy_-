@@ -2025,7 +2025,8 @@ def _run_job(folder: str, dry_run: bool, mode: str, wipe_cache: bool,
              threshold_near: int, threshold_far: int, near_seconds: int,
              prescreen_enabled: bool, prescreen_strength: str,
              face_aware: bool = True, engine: str = "fast",
-             llm_model: Optional[str] = None) -> None:
+             llm_model: Optional[str] = None,
+             filter_dates: Optional[list[str]] = None) -> None:
     global SESSION, LAST_INFOS
     job = JOB
     assert job is not None
@@ -2078,6 +2079,19 @@ def _run_job(folder: str, dry_run: bool, mode: str, wipe_cache: bool,
         )
         if _cancel_check():
             raise CancelledError()
+
+        # 按拍摄日过滤（filter_dates）
+        if filter_dates:
+            import datetime as _dt
+            date_set = set(filter_dates)
+            before_count = len(infos)
+            infos = [
+                info for info in infos
+                if _dt.date.fromtimestamp(info.mtime).isoformat() in date_set
+            ]
+            logger.info("filter_dates=%s 过滤后 %d/%d 张", date_set, len(infos), before_count)
+            if not infos:
+                raise RuntimeError(f"按日期过滤后没有照片，请检查所选日期是否正确")
         job.skipped = list(skipped)
         _record_skipped(folder, skipped)
 
@@ -2372,6 +2386,9 @@ def api_start():
     scoring_profile = data.get("scoring_profile", "general")
     if scoring_profile not in SCORING_PROFILES:
         scoring_profile = "general"
+    # 按日分批过滤：["2025-05-20", "2025-05-21"] 格式的 ISO 日期字符串列表，空列表=不过滤
+    raw_dates = data.get("filter_dates", [])
+    filter_dates: Optional[list[str]] = [d for d in raw_dates if isinstance(d, str) and len(d) == 10] or None
 
     if not folder:
         return jsonify({"error": "请填写文件夹路径"}), 400
@@ -2411,7 +2428,7 @@ def api_start():
         args=(folder, dry_run, mode, wipe_cache,
               threshold_near, threshold_far, near_seconds,
               prescreen_enabled, prescreen_strength, face_aware, engine,
-              llm_model),
+              llm_model, filter_dates),
         daemon=True,
     )
     t.start()
@@ -2903,6 +2920,151 @@ def api_image():
     except Exception as e:
         logger.warning(f"图片解码失败 {p}: {e}")
         return _placeholder_response()
+
+
+# ── 差异高亮 overlay ──────────────────────────────────────────────────────────
+@app.route("/api/diff")
+def api_diff():
+    """对两张图做像素级差分，返回 RGBA PNG：红色=有差异，透明=相同。
+    GET /api/diff?left=<path>&right=<path>&w=<max_side>
+    左右各自叠加同一张 diff 图，显示「我和对方不同的区域」。
+    """
+    if SESSION is None:
+        return Response(b"", status=400)
+    left_raw  = request.args.get("left", "")
+    right_raw = request.args.get("right", "")
+    if not left_raw or not right_raw:
+        return Response(b"", status=400)
+    try:
+        max_side = int(request.args.get("w", 800))
+    except ValueError:
+        max_side = 800
+    max_side = max(64, min(max_side, 1600))
+
+    lp = _validate_path_under_folder(left_raw)
+    rp = _validate_path_under_folder(right_raw)
+    if lp is None or rp is None:
+        return Response(b"", status=403)
+
+    try:
+        import numpy as np
+        limg = _safe_open_image(lp)
+        rimg = _safe_open_image(rp)
+        if limg is None or rimg is None:
+            return Response(b"", status=500)
+
+        limg = ImageOps.exif_transpose(limg).convert("RGB")
+        rimg = ImageOps.exif_transpose(rimg).convert("RGB")
+
+        # 统一缩到 max_side，以左图比例为准对齐尺寸
+        limg.thumbnail((max_side, max_side), Image.LANCZOS)
+        rimg = rimg.resize(limg.size, Image.LANCZOS)
+
+        diff = ImageChops.difference(limg, rimg)
+        diff_gray = diff.convert("L")
+        diff_gray = diff_gray.filter(ImageFilter.GaussianBlur(radius=2))
+
+        diff_arr = np.array(diff_gray, dtype=np.float32)
+        threshold = 12.0
+        alpha_arr = np.clip(
+            (diff_arr - threshold) / (255.0 - threshold) * 220, 0, 220
+        ).astype(np.uint8)
+
+        # 使用 Anthropic clay 红（#cc785c）作为高亮色
+        r_arr = np.clip(diff_arr * 1.8, 0, 204).astype(np.uint8)
+        g_arr = np.full_like(r_arr, 40)
+        b_arr = np.full_like(r_arr, 20)
+
+        rgba = np.stack([r_arr, g_arr, b_arr, alpha_arr], axis=2)
+        out = Image.fromarray(rgba, "RGBA")
+
+        buf = io.BytesIO()
+        out.save(buf, "PNG")
+        resp = Response(buf.getvalue(), mimetype="image/png")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    except Exception as e:
+        logger.warning(f"diff overlay failed: {e}")
+        return Response(b"", status=500)
+
+
+# ── 对焦热力图 overlay ─────────────────────────────────────────────────────────
+@app.route("/api/heatmap")
+def api_heatmap():
+    """计算单张图的空间锐度热力图，返回 RGBA PNG。
+    GET /api/heatmap?path=<path>&w=<max_side>
+    暖橙/红 = 锐利，冷蓝 = 模糊。
+    """
+    if SESSION is None:
+        return Response(b"", status=400)
+    raw = request.args.get("path", "")
+    if not raw:
+        return Response(b"", status=400)
+    try:
+        max_side = int(request.args.get("w", 800))
+    except ValueError:
+        max_side = 800
+    max_side = max(64, min(max_side, 1600))
+
+    p = _validate_path_under_folder(raw)
+    if p is None:
+        return Response(b"", status=403)
+
+    try:
+        import numpy as np
+
+        img = _safe_open_image(p)
+        if img is None:
+            return Response(b"", status=500)
+        img = ImageOps.exif_transpose(img).convert("L")
+        img.thumbnail((max_side, max_side), Image.LANCZOS)
+        w, h = img.size
+
+        GRID = 24
+        bw = max(1, w // GRID)
+        bh = max(1, h // GRID)
+        cols = w // bw
+        rows = h // bh
+
+        arr = np.array(img, dtype=np.float32)
+
+        heat = np.zeros((rows, cols), dtype=np.float32)
+        for r in range(rows):
+            for c in range(cols):
+                patch = arr[r*bh:(r+1)*bh, c*bw:(c+1)*bw]
+                # 简单 Laplacian 近似：中心减邻居均值
+                center = patch[1:-1, 1:-1] if patch.shape[0] > 2 and patch.shape[1] > 2 else patch
+                lap_var = float(np.var(center - np.mean(center)))
+                heat[r, c] = lap_var
+
+        mn, mx = heat.min(), heat.max()
+        heat = (heat - mn) / (mx - mn + 1e-8)
+
+        heat_img = Image.fromarray((heat * 255).astype(np.uint8), "L")
+        heat_img = heat_img.resize((cols * bw, rows * bh), Image.NEAREST)
+        heat_img = heat_img.filter(ImageFilter.GaussianBlur(radius=bw * 0.7))
+        heat_arr = np.array(heat_img, dtype=np.float32) / 255.0
+
+        # 颜色渐变: 冷蓝 (#4a7ab5) → 暖橙 (#cc785c)
+        r_ch = (heat_arr * 204 + (1 - heat_arr) * 74).astype(np.uint8)
+        g_ch = (heat_arr * 120 + (1 - heat_arr) * 122).astype(np.uint8)
+        b_ch = (heat_arr * 92  + (1 - heat_arr) * 181).astype(np.uint8)
+        alpha_ch = np.clip(heat_arr * 200, 25, 200).astype(np.uint8)
+
+        oh, ow = heat_arr.shape
+        rgba = np.stack([r_ch[:oh, :ow], g_ch[:oh, :ow],
+                         b_ch[:oh, :ow], alpha_ch[:oh, :ow]], axis=2)
+        out = Image.fromarray(rgba, "RGBA")
+        out = out.resize((w, h), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        out.save(buf, "PNG")
+        resp = Response(buf.getvalue(), mimetype="image/png")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    except Exception as e:
+        logger.warning(f"heatmap failed: {e}")
+        return Response(b"", status=500)
 
 
 @app.route("/api/image_original")
@@ -3447,6 +3609,87 @@ def api_capabilities():
     return jsonify({"face_aware": face})
 
 
+# ── 归档到相册文件夹 ──────────────────────────────────────────────────────────
+@app.route("/api/archive", methods=["POST"])
+def api_archive():
+    """将当前 session 的 winners 文件归档到指定的相册文件夹。
+
+    POST /api/archive
+    Body: {
+      "dest_root": "/path/to/photo_library",
+      "album_name": "京都2025",
+      "mode": "copy" | "move"   # 默认 copy
+    }
+    """
+    if SESSION is None:
+        return jsonify({"error": "没有进行中的 session"}), 400
+
+    data = request.get_json(force=True) or {}
+    dest_root = (data.get("dest_root") or "").strip()
+    album_name = (data.get("album_name") or "").strip()
+    mode = data.get("mode", "copy")
+    if mode not in ("copy", "move"):
+        mode = "copy"
+
+    if not dest_root:
+        return jsonify({"error": "请指定目标根目录"}), 400
+    if not album_name:
+        return jsonify({"error": "请输入相册名称"}), 400
+
+    # 安全校验：目标不能是 session 文件夹内部（防止循环搬运）
+    dest_root_path = Path(dest_root).expanduser().resolve()
+    session_folder = Path(SESSION.folder).resolve()
+    try:
+        dest_root_path.relative_to(session_folder)
+        return jsonify({"error": "目标目录不能是照片文件夹内部"}), 400
+    except ValueError:
+        pass  # 正常：目标在 session 文件夹外
+
+    # 收集 winners（参考 _winner_paths 逻辑，兼容 applied/未 applied 两种状态）
+    winners_dir = session_folder / "winners"
+    if not winners_dir.is_dir():
+        return jsonify({"error": "还没有胜出照片，请先完成选片"}), 400
+
+    winner_files = [p for p in winners_dir.iterdir() if p.is_file()]
+    if not winner_files:
+        return jsonify({"error": "winners 文件夹为空"}), 400
+
+    # 创建目标目录
+    dest = dest_root_path / album_name
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return jsonify({"error": f"无法创建目标目录: {e}"}), 500
+
+    ok_count = 0
+    failed = []
+    for src in winner_files:
+        dst = dest / src.name
+        # 文件名冲突时自动重命名（加 _1, _2 …）
+        counter = 1
+        while dst.exists():
+            stem = src.stem + f"_{counter}"
+            dst = dest / (stem + src.suffix)
+            counter += 1
+        try:
+            if mode == "move":
+                shutil.move(str(src), str(dst))
+            else:
+                shutil.copy2(str(src), str(dst))
+            ok_count += 1
+        except OSError as e:
+            logger.warning(f"archive failed for {src}: {e}")
+            failed.append(src.name)
+
+    return jsonify({
+        "ok": True,
+        "dest": str(dest),
+        "count": ok_count,
+        "failed": failed,
+        "mode": mode,
+    })
+
+
 @app.route("/api/browse_folder", methods=["POST"])
 def api_browse_folder():
     """调起系统原生选文件夹对话框（macOS: osascript / Win: tkinter / Linux: zenity）。"""
@@ -3525,6 +3768,7 @@ def api_peek_folder():
     hour_hist = [0] * 24
     samples_landscape: list[str] = []
     samples_portrait: list[str] = []
+    day_counts: dict[str, int] = {}  # "YYYY-MM-DD" → count
     try:
         for entry in os.scandir(p):
             if not entry.is_file(follow_symlinks=False):
@@ -3544,6 +3788,10 @@ def api_peek_folder():
                 latest = mt
             hr = time.localtime(mt).tm_hour
             hour_hist[hr] += 1
+            # 按 mtime 日期统计（近似 EXIF 日期，保持极速不解码）
+            lt = time.localtime(mt)
+            date_key = f"{lt.tm_year:04d}-{lt.tm_mon:02d}-{lt.tm_mday:02d}"
+            day_counts[date_key] = day_counts.get(date_key, 0) + 1
             # 简单按文件名拿 3 张样本（首 / 中 / 尾），后端不解码
             if count <= 1 or count == 50 or count == 200:
                 samples_landscape.append(entry.path)
@@ -3588,6 +3836,23 @@ def api_peek_folder():
 
     has_prior = (p / "winners").is_dir() or (p / "losers").is_dir() or state_path(folder).exists()
 
+    def _fmt_day_label(date_key: str) -> str:
+        """'2025-05-20' → '5月20日 周二'"""
+        weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        try:
+            import datetime as dt
+            d = dt.date.fromisoformat(date_key)
+            wd = weekdays[d.weekday()]
+            return f"{d.month}月{d.day}日 {wd}"
+        except Exception:
+            return date_key
+
+    sorted_days = sorted(day_counts.items())  # 按日期排序
+    days_list = [
+        {"date": k, "label": _fmt_day_label(k), "count": v}
+        for k, v in sorted_days
+    ]
+
     return jsonify({
         "ok": True,
         "count": count,
@@ -3598,6 +3863,7 @@ def api_peek_folder():
         "active_period": _half_day_label(),
         "samples": samples_landscape[:3],
         "has_prior": has_prior,
+        "days": days_list,  # 新增：按日分批用
     })
 
 
